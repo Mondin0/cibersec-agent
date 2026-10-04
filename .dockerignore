@@ -1,0 +1,14 @@
+# Allowlist: do not send private config, secrets or local environments to Docker.
+*
+!Dockerfile
+!docker-compose.yml
+!.dockerignore
+!pyproject.toml
+!requirements.lock
+!config.example.yaml
+!app/
+!app/**
+!tests/
+!tests/**
+**/__pycache__/
+**/*.py[cod]

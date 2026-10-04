@@ -1,0 +1,17 @@
+scope:
+  # Agregar permisos explícitos únicamente en la copia local config.yaml.
+  domains: []
+  ips: []
+
+policy:
+  max_requests_per_second: 5
+  destructive_tests: false
+  brute_force: false
+  dos: false
+
+# Habilitación prevista: todavía no hay implementaciones de estas tools.
+tools:
+  http_headers: true
+  tls: true
+  nmap: false
+  nuclei: false
