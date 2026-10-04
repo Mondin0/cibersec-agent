@@ -15,6 +15,8 @@ Proyecto local de ciberseguridad defensiva para targets con autorización explí
 - Suite: `.venv/bin/python -m unittest discover -s tests -v`; scope: `.venv/bin/python -m unittest tests.test_scope -v`; caso individual: `.venv/bin/python -m unittest tests.test_scope.ScopeTests.test_no_inherited_or_suffix_authorization -v`.
 - Sin `--config`, el CLI busca `config.yaml` relativo al cwd; no cae automáticamente al ejemplo. Códigos: `0` autorizado, `1` fuera del scope, `2` entrada/configuración/uso inválido. Errores a stderr.
 - Scope real solo en `config.yaml`, local y excluido de Git/imagen. `config.example.yaml` tiene scope vacío. No hardcodear dominios ni targets del fixture en Python; tests usan exclusivamente `tests/fixtures/config.yaml` mediante `tests/support.py`, sin depender de permisos reales.
+- El fixture `tests/fixtures/config.yaml` debe incluirse en Git. Mantener la exclusión como `/config.yaml`, no `config.yaml`: la regla sin slash también oculta el fixture. Verificar los archivos publicables y probar una copia limpia antes de afirmar que un clon funciona.
+- Regresión de exclusiones (host con Git): `.venv/bin/python -m unittest tests.check_git -v`; no ejecutar esta suite dentro de la imagen, que no contiene Git ni el checkout.
 - Docker: `docker compose build`, luego `docker compose run --rm agent scope <target>`; suite: `docker compose run --rm --entrypoint python agent -m unittest discover -s tests -v`. No es un daemon y no requiere `up`.
 - Aislamiento efectivo: `docker compose run --rm --entrypoint python agent -m unittest tests.check_container -v`. Esta suite es solo para Compose, no para el host; verificar UID, capabilities, filesystem y ausencia de interfaces de red externas.
 - Compose monta `config.yaml` read-only y falla si falta; imagen sin scope real, usuario no root, filesystem read-only, `/tmp` temporal, capabilities eliminadas y sin red. No habilitar networking ni privilegios para esta etapa.
@@ -38,7 +40,7 @@ Proyecto local de ciberseguridad defensiva para targets con autorización explí
 - El agente propone una prueba; el código decide si está permitida. Nunca aceptar comandos ni argumentos libres generados por un LLM.
 - Una única función central debe validar scope. Cada futura herramienta debe pasar por ella antes de cualquier conexión o ejecución.
 - Dominios con coincidencia exacta: autorizar un dominio no autoriza subdominios ni las IPs resueltas.
-- El usuario confirmó propiedad del dominio declarado en el scope local. Esto no implica autorización para escanear infraestructura compartida del hosting; usar solo targets sintéticos del fixture en tests.
+- No inferir autorización legal o propiedad por la presencia de un target en `config.yaml`; requiere confirmación explícita y delimitación de infraestructura. La confirmación previa del usuario no cubre targets agregados posteriormente ni hosting compartido; usar solo targets sintéticos del fixture en tests.
 - En la primera etapa, admitir únicamente hostnames e IPs individuales: no URLs, puertos, rutas, comodines ni CIDR. Normalizar mayúsculas en dominios y comparar IPs con `ipaddress`.
 - Rechazar entradas inválidas o fuera del scope antes de ejecutar acciones. Distinguir errores de sintaxis, autorización y configuración.
 - Fallar cerrado: configuración inválida, entrada dudosa o acción desconocida implica rechazo, nunca autorización por defecto.

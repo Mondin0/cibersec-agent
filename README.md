@@ -19,7 +19,13 @@ No se usa `.env` ni se requieren credenciales. `.venv` y la configuración local
 
 ## Consulta de autorización
 
-Los permisos reales se definen únicamente en `config.yaml` (local, excluido de Git y Docker). Este entorno ya tiene una configuración local con el dominio confirmado por el usuario. Para consultar un target declarado allí:
+Los permisos reales se definen únicamente en `config.yaml` (local, excluido de Git y Docker). Al clonar el repositorio, este archivo no existe. Copiar el ejemplo **solo si no existe `config.yaml`**:
+
+```bash
+cp -n config.example.yaml config.yaml
+```
+
+Luego editar su scope para incluir únicamente targets con autorización explícita. El ejemplo tiene scope vacío y no concede permisos. Para consultar un target declarado allí:
 
 ```bash
 .venv/bin/python -m app.main scope "<target-autorizado>"
@@ -32,18 +38,11 @@ AUTORIZADO: <target-autorizado>
 Motivo: coincidencia exacta con una entrada del scope. No se realizó ningún escaneo.
 ```
 
-En una instalación nueva, copiar el ejemplo **solo si no existe `config.yaml`**, y editar su scope según la autorización real:
-
-```bash
-cp -n config.example.yaml config.yaml
-.venv/bin/python -m app.main scope "<target-autorizado>"
-```
-
-Reemplazar los placeholders por targets reales. El ejemplo tiene scope vacío y no concede permisos. El path por defecto es `config.yaml` relativo al directorio de ejecución; se puede seleccionar otro archivo con `--config <ruta>`. Si falta o es inválido, se rechaza la consulta: nunca se utilizan permisos de ejemplo automáticamente.
+Reemplazar los placeholders por targets reales. El path por defecto es `config.yaml` relativo al directorio de ejecución; se puede seleccionar otro archivo con `--config <ruta>`. Si falta o es inválido, se rechaza la consulta: nunca se utilizan permisos de ejemplo automáticamente.
 
 ## Docker
 
-Docker Engine y plugin Compose; no es un servicio web ni necesita `docker compose up`:
+Docker Engine y plugin Compose; no requiere instalar Python o crear `.venv` en el host. Preparar `config.yaml` como se indica arriba antes de ejecutar el CLI. No es un servicio web ni necesita `docker compose up`:
 
 ```bash
 docker compose build
@@ -99,6 +98,9 @@ La propiedad declarada del dominio se usa como contexto, no como verificación a
 
 # Un contrato concreto
 .venv/bin/python -m unittest tests.test_scope.ScopeTests.test_no_inherited_or_suffix_authorization -v
+
+# Regresión de exclusiones: requiere Git, solo en el checkout del host
+.venv/bin/python -m unittest tests.check_git -v
 ```
 
 | Criterio de aceptación | Verificación |
@@ -111,7 +113,7 @@ La propiedad declarada del dominio se usa como contexto, no como verificación a
 | Finding: severidad, estado, CVSS finito entre 0 y 10, timestamp con zona y JSON | `tests/test_models.py` |
 | Targets sin duplicación en Python y restricciones de empaquetado | `tests/test_packaging.py` |
 
-Los tests usan únicamente `tests/fixtures/config.yaml`, con targets reservados, y no leen el scope real. `tests/support.py` obtiene expectativas del YAML sin pasar por la normalización bajo prueba. Los tests del CLI bloquean y comprueban llamadas a funciones de sockets, DNS, subprocess y shell; no contactan targets. No se configuró todavía un linter, typechecker ni medición de cobertura. Los tests no certifican la seguridad de herramientas futuras.
+Los tests usan únicamente `tests/fixtures/config.yaml`, con targets reservados, y no leen el scope real. Este fixture debe incluirse en Git; la regla `/config.yaml` de `.gitignore` excluye solamente la configuración privada de la raíz. `tests/support.py` obtiene expectativas del YAML sin pasar por la normalización bajo prueba. Los tests del CLI bloquean y comprueban llamadas a funciones de sockets, DNS, subprocess y shell; no contactan targets. No se configuró todavía un linter, typechecker ni medición de cobertura. Los tests no certifican la seguridad de herramientas futuras.
 
 ## Límites de esta entrega
 

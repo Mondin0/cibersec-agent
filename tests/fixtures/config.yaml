@@ -1,0 +1,20 @@
+# Targets reservados para pruebas locales; no representan autorización real.
+scope:
+  domains:
+    - authorized.test
+    - explicit.authorized.test
+  ips:
+    - 192.0.2.15
+    - 2001:db8::1
+
+policy:
+  max_requests_per_second: 5
+  destructive_tests: false
+  brute_force: false
+  dos: false
+
+tools:
+  http_headers: true
+  tls: true
+  nmap: false
+  nuclei: false
