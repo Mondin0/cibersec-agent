@@ -4,27 +4,30 @@ Proyecto local de ciberseguridad defensiva para targets con autorización explí
 
 ## Alcance inicial acordado
 
-- Primera etapa implementada: configuración, modelo Finding, scope centralizado, policy, CLI de consulta y tests. No ampliar el alcance sin aprobación del usuario.
-- CLI existente: `.venv/bin/python -m app.main scope <target>`. Es una consulta local de configuración, no prueba de propiedad ni escaneo: no debe hacer conexiones HTTP, resolver DNS o ejecutar herramientas externas.
-- No implementar todavía `scan`, HTTP headers, TLS, Nmap, Nuclei, LLM, almacenamiento de evidencia ni reportes.
-- Python 3.12+ (verificado con 3.12.3), Pydantic, PyYAML y `unittest`. Comandos y contratos completos en `README.md`.
+- Implementadas: configuración, modelo `Finding`, scope centralizado, policy, CLI `scope` y MVP `scan` de headers públicos con reportes. No ampliar el alcance sin aprobación.
+- `scope` es consulta local y no usa red. `scan <hostname>` hace un GET HTTPS a `/`, con policy/scope previos, y genera JSON/Markdown; no usa LLM.
+- Fuera de alcance: crawling, auth, explotación, evaluación del origen/DC, Nmap, Nuclei, IA y comparación de ejecuciones.
+- Python 3.12+ (verificado con 3.12.3), Pydantic, PyYAML y `unittest`. Contratos en `README.md`, `ROADMAP.md` y `docs/mvp.md`.
 
 ## Comandos y límites existentes
 
 - Instalación: `python3 -m venv .venv`, luego `.venv/bin/python -m pip install -r requirements.lock`, luego `.venv/bin/python -m pip install -e . --no-deps --no-build-isolation`. El lockfile incluye el backend; instalarlo primero.
 - Suite: `.venv/bin/python -m unittest discover -s tests -v`; scope: `.venv/bin/python -m unittest tests.test_scope -v`; caso individual: `.venv/bin/python -m unittest tests.test_scope.ScopeTests.test_no_inherited_or_suffix_authorization -v`.
-- Sin `--config`, el CLI busca `config.yaml` relativo al cwd; no cae automáticamente al ejemplo. Códigos: `0` autorizado, `1` fuera del scope, `2` entrada/configuración/uso inválido. Errores a stderr.
+- Sin `--config`, el CLI busca `config.yaml` relativo al cwd; no cae automáticamente al ejemplo. Códigos: `0` consulta autorizada/evaluación completada, `1` fuera de scope o acción denegada, `2` entrada/config/uso/artefactos inválidos, `3` evaluación incompleta con reporte.
 - Scope real solo en `config.yaml`, local y excluido de Git/imagen. `config.example.yaml` tiene scope vacío. No hardcodear dominios ni targets del fixture en Python; tests usan exclusivamente `tests/fixtures/config.yaml` mediante `tests/support.py`, sin depender de permisos reales.
 - El fixture `tests/fixtures/config.yaml` debe incluirse en Git. Mantener la exclusión como `/config.yaml`, no `config.yaml`: la regla sin slash también oculta el fixture. Verificar los archivos publicables y probar una copia limpia antes de afirmar que un clon funciona.
 - Regresión de exclusiones (host con Git): `.venv/bin/python -m unittest tests.check_git -v`; no ejecutar esta suite dentro de la imagen, que no contiene Git ni el checkout.
-- Docker: `docker compose build`, luego `docker compose run --rm agent scope <target>`; suite: `docker compose run --rm --entrypoint python agent -m unittest discover -s tests -v`. No es un daemon y no requiere `up`.
-- Aislamiento efectivo: `docker compose run --rm --entrypoint python agent -m unittest tests.check_container -v`. Esta suite es solo para Compose, no para el host; verificar UID, capabilities, filesystem y ausencia de interfaces de red externas.
-- Compose monta `config.yaml` read-only y falla si falta; imagen sin scope real, usuario no root, filesystem read-only, `/tmp` temporal, capabilities eliminadas y sin red. No habilitar networking ni privilegios para esta etapa.
+- Docker: `docker compose build`, luego `docker compose run --rm agent scope <target>` o `scan <hostname> --evidence-dir /evidence`; suite: `docker compose run --rm --entrypoint python agent -m unittest discover -s tests -v`. No es un daemon.
+- Crear `evidence/` en el host además de `config.yaml`. Compose monta config read-only y evidence en `/evidence`; `APP_UID`/`APP_GID` permiten ownership local al escanear.
+- Compose usa bridge por la evaluación pública. Conserva no-root, filesystem read-only, `/tmp` temporal, capabilities eliminadas, no-new-privileges, sin puertos ni socket Docker. Egress no está limitado por Docker; el scanner valida DNS y fija IP pública.
+- Aislamiento efectivo: `docker compose run --rm --entrypoint python agent -m unittest tests.check_container -v`. Solo dentro de Compose; verifica UID efectivo, capabilities, filesystem e interfaz habilitada.
 - Imagen base fijada por digest; `.dockerignore` usa allowlist. Al actualizar empaquetado, conservar los tests ejecutables dentro de la imagen y verificar que no se incluya configuración privada.
 - Sintaxis y autorización están en `app/scope.py`; `app/config.py` reutiliza la sintaxis. `authorize_action` en `app/policy.py` devuelve el target normalizado, no ejecuta una tool.
 - Configuración estricta e inmutable, YAML seguro UTF-8 hasta 64 KiB, sin claves desconocidas o duplicadas. No usar `model_construct` ni actualizaciones sin validación para aceptar configuración externa.
-- Solo hostnames ASCII de múltiples etiquetas sin punto final e IPs individuales; no hay conversión IDNA ni DNS. Los tests del CLI bloquean funciones de red y procesos.
-- `max_requests_per_second` solo se valida; rate limiting, DNS seguro y redirects deben resolverse antes de incorporar conexiones reales. No hay linter, typechecker ni cobertura configurados.
+- `scope` admite hostnames ASCII de múltiples etiquetas e IPs individuales sin convertir IDNA; no hace DNS. `scan` admite hostname solamente y resuelve DNS absoluto para fijar una IP pública al socket.
+- `scan`: un GET a HTTPS/443 `/`, hostname/SNI verificados, sin redirect ni retry, máximo 15 s incluyendo DNS y 64 KiB de status+headers. Persiste solo headers allowlisted, no body/cookies/Location.
+- `max_requests_per_second` solo se valida: no hace rate limiting entre procesos. El timeout de DNS usa hilo daemon, porque el resolver libc no se puede cancelar.
+- Tests CLI verifican que `scope` no hace red/procesos; tests web usan solo TLS local sintético con DNS/IP simulados. No hay linter, typechecker ni cobertura configurados.
 
 ## Contratos y forma de trabajo
 
@@ -38,21 +41,21 @@ Proyecto local de ciberseguridad defensiva para targets con autorización explí
 ## Autorización y seguridad
 
 - El agente propone una prueba; el código decide si está permitida. Nunca aceptar comandos ni argumentos libres generados por un LLM.
-- Una única función central debe validar scope. Cada futura herramienta debe pasar por ella antes de cualquier conexión o ejecución.
+- Una única función central valida scope. `scan` debe consultar `authorize_action` antes de DNS o cualquier socket.
 - Dominios con coincidencia exacta: autorizar un dominio no autoriza subdominios ni las IPs resueltas.
-- No inferir autorización legal o propiedad por la presencia de un target en `config.yaml`; requiere confirmación explícita y delimitación de infraestructura. La confirmación previa del usuario no cubre targets agregados posteriormente ni hosting compartido; usar solo targets sintéticos del fixture en tests.
-- En la primera etapa, admitir únicamente hostnames e IPs individuales: no URLs, puertos, rutas, comodines ni CIDR. Normalizar mayúsculas en dominios y comparar IPs con `ipaddress`.
+- No inferir autorización legal o propiedad por la presencia de un target en `config.yaml`; requiere autorización explícita y delimitación de infraestructura. Un dominio no implica CDN, hosting compartido u origen. Usar targets sintéticos en tests; nunca targets reales.
+- Scope admite dominios/IPs individuales: no URLs, puertos, rutas, comodines ni CIDR. `scan` solo admite hostnames exactos declarados en `scope.domains`; IP conectada es transporte, no un target autorizado.
 - Rechazar entradas inválidas o fuera del scope antes de ejecutar acciones. Distinguir errores de sintaxis, autorización y configuración.
 - Fallar cerrado: configuración inválida, entrada dudosa o acción desconocida implica rechazo, nunca autorización por defecto.
 - Policy con acciones conocidas y herramientas habilitadas; rechazar configuraciones que permitan brute force, DoS o pruebas destructivas.
-- Nunca ejecutar shell arbitrario ni usar `shell=True`. Las futuras herramientas construirán internamente comandos fijos, con timeout y captura de stdout/stderr.
-- No borrar ni modificar información del target. No hacer pruebas reales como parte de los tests de esta etapa.
+- Nunca ejecutar shell arbitrario ni usar `shell=True`. No borrar ni modificar información del target.
+- Una evaluación es exactamente un GET; no seguir redirects, reintentar, explorar rutas ni persistir el body. Autorizar explícitamente `GET /`: una app defectuosa podría modificar estado aun con GET. Un error produce `incomplete`, nunca un resultado limpio.
 
 ## Verificación y etapas posteriores
 
-- Tests iniciales: dominios exactos, subdominios explícitos y no autorizados, sufijos engañosos, IPs permitidas y rechazadas, inyección en targets, acciones bloqueadas y configuración insegura.
-- Probar también mensajes y códigos de salida del CLI y que la consulta de scope no use red ni herramientas externas. La verificación de autorización no sustituye la verificación de seguridad de futuras herramientas.
+- Mantener tests existentes de dominios, subdominios, IPs, inyección, policy/config y códigos del CLI.
+- Tests web: DNS no global, pinning IP, TLS/SNI y certificado inválido, un GET, sin redirect/retry, límites, headers allowlisted, outputs exclusivos, permisos y JSON/Markdown. Solo servidor de TLS sintético en loopback.
 - Ejecutar los tests tras cada bloque de implementación; informar resultados y pendientes antes de avanzar de etapa.
-- Agregar herramientas una por una solamente después de verificar la autorización y obtener aprobación para continuar.
-- La evidencia futura debe tener identificadores únicos por ejecución y nunca sobrescribir ejecuciones anteriores.
-- Preparar `Finding` para referencias opcionales a controles ISO/IEC 27001; ningún reporte constituye certificación ISO.
+- Agregar capacidades una por una, tras verificar la autorización y obtener aprobación para continuar.
+- Cada ejecución genera ID y directorio exclusivo; no sobrescribir reportes anteriores. Retención, respaldo y acceso son responsabilidad del usuario.
+- Referencias ISO son orientativas; no afirman conformidad/certificación ni demuestran eficacia integral del control.

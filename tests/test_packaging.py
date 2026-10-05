@@ -18,19 +18,24 @@ class PackagingTests(unittest.TestCase):
                     with self.subTest(path=path, target=target):
                         self.assertNotIn(target, source)
 
-    def test_compose_preserves_offline_read_only_boundary(self) -> None:
+    def test_compose_preserves_read_only_boundary_and_enables_public_scans(self) -> None:
         agent = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]["agent"]
-        self.assertEqual(agent["network_mode"], "none")
+        self.assertEqual(agent["network_mode"], "bridge")
+        self.assertEqual(agent["user"], "${APP_UID:-10001}:${APP_GID:-10001}")
         self.assertTrue(agent["read_only"])
         self.assertEqual(agent["cap_drop"], ["ALL"])
         self.assertIn("no-new-privileges:true", agent["security_opt"])
         self.assertNotIn("ports", agent)
         self.assertFalse(agent.get("privileged", False))
-        mount, = agent["volumes"]
-        self.assertEqual(mount["source"], "./config.yaml")
-        self.assertEqual(mount["target"], "/app/config.yaml")
-        self.assertTrue(mount["read_only"])
-        self.assertFalse(mount["bind"]["create_host_path"])
+        config_mount, evidence_mount = agent["volumes"]
+        self.assertEqual(config_mount["source"], "./config.yaml")
+        self.assertEqual(config_mount["target"], "/app/config.yaml")
+        self.assertTrue(config_mount["read_only"])
+        self.assertFalse(config_mount["bind"]["create_host_path"])
+        self.assertEqual(evidence_mount["source"], "./evidence")
+        self.assertEqual(evidence_mount["target"], "/evidence")
+        self.assertFalse(evidence_mount.get("read_only", False))
+        self.assertFalse(evidence_mount["bind"]["create_host_path"])
 
     def test_dockerfile_nonroot_and_fixed_entrypoint(self) -> None:
         lines = (ROOT / "Dockerfile").read_text().splitlines()

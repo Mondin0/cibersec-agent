@@ -2,7 +2,8 @@ services:
   agent:
     build: .
     image: defensive-security-agent:local
-    network_mode: none
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    network_mode: bridge
     read_only: true
     cap_drop:
       - ALL
@@ -15,5 +16,10 @@ services:
         source: ./config.yaml
         target: /app/config.yaml
         read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./evidence
+        target: /evidence
         bind:
           create_host_path: false

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from app.main import main
-from tests.support import DOMAIN, FIXTURE_PATH, FIXTURE_TEXT
+from tests.support import DOMAIN, FIXTURE_PATH, FIXTURE_TEXT, IPV4
 
 
 class CliTests(unittest.TestCase):
@@ -71,13 +71,66 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.invoke(["scope", DOMAIN])[0], 2)
             loader.assert_called_once_with(Path("config.yaml"))
 
-    def test_usage_errors_and_scan_not_available(self) -> None:
-        for args in ([], ["scope"], ["scan", DOMAIN]):
+    def test_usage_errors(self) -> None:
+        for args in ([], ["scope"], ["scan"]):
             with self.subTest(args=args):
                 code, stdout, stderr = self.invoke(args)
                 self.assertEqual(code, 2)
                 self.assertEqual(stdout, "")
                 self.assertTrue(stderr)
+
+    def test_scan_authorizes_before_assessment(self) -> None:
+        report = {"status": "complete", "run_id": "run-test"}
+        with patch("app.main.assess_public_headers", return_value=(report, Path("evidence/run-test"))) as assess:
+            code, stdout, stderr = self.invoke([
+                "scan", DOMAIN, "--config", str(FIXTURE_PATH), "--evidence-dir", "evidence",
+            ])
+        self.assertEqual(code, 0)
+        self.assertIn("EVALUACIÓN: complete", stdout)
+        self.assertEqual(stderr, "")
+        assess.assert_called_once_with(DOMAIN, Path("evidence"))
+
+    def test_scan_rejects_ip_without_assessment(self) -> None:
+        with patch("app.main.assess_public_headers") as assess:
+            code, stdout, stderr = self.invoke([
+                "scan", IPV4, "--config", str(FIXTURE_PATH),
+            ])
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("requiere un hostname", stderr)
+        assess.assert_not_called()
+
+    def test_scan_rejects_out_of_scope_before_assessment(self) -> None:
+        with patch("app.main.assess_public_headers") as assess:
+            code, stdout, stderr = self.invoke([
+                "scan", f"outside.{DOMAIN}", "--config", str(FIXTURE_PATH),
+            ])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("BLOQUEADO", stderr)
+        assess.assert_not_called()
+
+    def test_scan_rejects_disabled_tool_before_assessment(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(directory) / "config.yaml"
+            config.write_text(FIXTURE_TEXT.replace("http_headers: true", "http_headers: false"), encoding="utf-8")
+            with patch("app.main.assess_public_headers") as assess:
+                code, stdout, stderr = self.invoke(["scan", DOMAIN, "--config", str(config)])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("deshabilitada", stderr)
+        assess.assert_not_called()
+
+    def test_incomplete_scan_uses_exit_code_three(self) -> None:
+        with patch("app.main.assess_public_headers", return_value=(
+            {"status": "incomplete", "run_id": "run-test"}, Path("evidence/run-test"),
+        )):
+            code, stdout, stderr = self.invoke([
+                "scan", DOMAIN, "--config", str(FIXTURE_PATH),
+            ])
+        self.assertEqual(code, 3)
+        self.assertIn("EVALUACIÓN: incomplete", stdout)
+        self.assertEqual(stderr, "")
 
     def test_help(self) -> None:
         code, stdout, stderr = self.invoke(["--help"])

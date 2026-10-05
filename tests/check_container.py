@@ -16,13 +16,14 @@ class ContainerBoundaryTests(unittest.TestCase):
         self.assertEqual(int(status["CapEff"].strip(), 16), 0)
         self.assertEqual(status["NoNewPrivs"].strip(), "1")
 
-    def test_network_has_only_loopback(self) -> None:
-        self.assertEqual({path.name for path in Path("/sys/class/net").iterdir()}, {"lo"})
+    def test_network_interface_is_available_for_public_evaluation(self) -> None:
+        self.assertTrue(any(path.name != "lo" for path in Path("/sys/class/net").iterdir()))
 
     def test_filesystem_and_configuration_are_read_only(self) -> None:
         for path in ("/app", "/app/config.yaml"):
             with self.subTest(path=path):
                 self.assertTrue(os.statvfs(path).f_flag & os.ST_RDONLY)
+        self.assertFalse(os.statvfs("/evidence").f_flag & os.ST_RDONLY)
 
     def test_temporary_storage_is_writable(self) -> None:
         with TemporaryDirectory(dir="/tmp") as directory:
